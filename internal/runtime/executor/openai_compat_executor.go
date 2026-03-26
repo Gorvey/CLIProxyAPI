@@ -157,7 +157,7 @@ func (e *OpenAICompatExecutor) Execute(ctx context.Context, auth *cliproxyauth.A
 		b, _ := io.ReadAll(httpResp.Body)
 		appendAPIResponseChunk(ctx, e.cfg, b)
 		logWithRequestID(ctx).Debugf("request error, error status: %d, error message: %s", httpResp.StatusCode, summarizeErrorBody(httpResp.Header.Get("Content-Type"), b))
-		err = statusErr{code: httpResp.StatusCode, msg: string(b)}
+		err = newOpenAICompatStatusErr(ctx, auth, baseModel, httpResp.StatusCode, b)
 		return resp, err
 	}
 	body, err := io.ReadAll(httpResp.Body)
@@ -258,7 +258,7 @@ func (e *OpenAICompatExecutor) ExecuteStream(ctx context.Context, auth *cliproxy
 		if errClose := httpResp.Body.Close(); errClose != nil {
 			log.Errorf("openai compat executor: close response body error: %v", errClose)
 		}
-		err = statusErr{code: httpResp.StatusCode, msg: string(b)}
+		err = newOpenAICompatStatusErr(ctx, auth, baseModel, httpResp.StatusCode, b)
 		return nil, err
 	}
 	out := make(chan cliproxyexecutor.StreamChunk)
@@ -384,6 +384,71 @@ func (e *OpenAICompatExecutor) overrideModel(payload []byte, model string) []byt
 	}
 	payload, _ = sjson.SetBytes(payload, "model", model)
 	return payload
+}
+
+func newOpenAICompatStatusErr(ctx context.Context, auth *cliproxyauth.Auth, model string, statusCode int, body []byte) statusErr {
+	err := statusErr{code: statusCode, msg: string(body)}
+	retryAfter, unlockAt, ok := cloudflareRetryAfter(auth, statusCode, time.Now())
+	if !ok {
+		return err
+	}
+	err.retryAfter = &retryAfter
+	logWithRequestID(ctx).Warnf(
+		"cf provider disabled, provider=%s model=%s until %s unlock",
+		openAICompatProviderLabel(auth),
+		redactModelName(model),
+		unlockAt.UTC().Format(time.RFC3339),
+	)
+	return err
+}
+
+func cloudflareRetryAfter(auth *cliproxyauth.Auth, statusCode int, now time.Time) (time.Duration, time.Time, bool) {
+	if statusCode != http.StatusTooManyRequests || !isCloudflareBaseURL(auth) {
+		return 0, time.Time{}, false
+	}
+	unlockAt := nextUTCMidnight(now).Add(5 * time.Minute)
+	return unlockAt.Sub(now), unlockAt, true
+}
+
+func isCloudflareBaseURL(auth *cliproxyauth.Auth) bool {
+	if auth == nil || auth.Attributes == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(strings.TrimSpace(auth.Attributes["base_url"])), "cloudflare")
+}
+
+func nextUTCMidnight(now time.Time) time.Time {
+	nowUTC := now.UTC()
+	return time.Date(nowUTC.Year(), nowUTC.Month(), nowUTC.Day()+1, 0, 0, 0, 0, time.UTC)
+}
+
+func openAICompatProviderLabel(auth *cliproxyauth.Auth) string {
+	if auth == nil {
+		return "unknown"
+	}
+	if provider := strings.TrimSpace(auth.Provider); provider != "" {
+		return provider
+	}
+	if auth.Attributes != nil {
+		if provider := strings.TrimSpace(auth.Attributes["provider_key"]); provider != "" {
+			return provider
+		}
+		if compatName := strings.TrimSpace(auth.Attributes["compat_name"]); compatName != "" {
+			return compatName
+		}
+	}
+	if label := strings.TrimSpace(auth.Label); label != "" {
+		return label
+	}
+	return "unknown"
+}
+
+func redactModelName(model string) string {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return "unknown"
+	}
+	return model
 }
 
 type statusErr struct {
