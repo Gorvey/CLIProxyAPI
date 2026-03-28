@@ -397,7 +397,7 @@ func newOpenAICompatStatusErr(ctx context.Context, auth *cliproxyauth.Auth, mode
 		"cf provider disabled, provider=%s model=%s until %s unlock",
 		openAICompatProviderLabel(auth),
 		redactModelName(model),
-		unlockAt.UTC().Format(time.RFC3339),
+		unlockAt.In(qwenBeijingLoc).Format(time.RFC3339),
 	)
 	return err
 }
@@ -406,8 +406,8 @@ func cloudflareRetryAfter(auth *cliproxyauth.Auth, statusCode int, now time.Time
 	if statusCode != http.StatusTooManyRequests || !isCloudflareBaseURL(auth) {
 		return 0, time.Time{}, false
 	}
-	unlockAt := nextUTCMidnight(now).Add(5 * time.Minute)
-	return unlockAt.Sub(now), unlockAt, true
+	retryAfter, unlockAt := timeUntilNextDayAt(now, qwenBeijingLoc)
+	return retryAfter, unlockAt, true
 }
 
 func isCloudflareBaseURL(auth *cliproxyauth.Auth) bool {
@@ -415,11 +415,6 @@ func isCloudflareBaseURL(auth *cliproxyauth.Auth) bool {
 		return false
 	}
 	return strings.Contains(strings.ToLower(strings.TrimSpace(auth.Attributes["base_url"])), "cloudflare")
-}
-
-func nextUTCMidnight(now time.Time) time.Time {
-	nowUTC := now.UTC()
-	return time.Date(nowUTC.Year(), nowUTC.Month(), nowUTC.Day()+1, 0, 0, 0, 0, time.UTC)
 }
 
 func openAICompatProviderLabel(auth *cliproxyauth.Auth) string {

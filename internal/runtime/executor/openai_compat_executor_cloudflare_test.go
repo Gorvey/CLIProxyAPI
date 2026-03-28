@@ -17,7 +17,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func TestCloudflareRetryAfterUsesNextUTCMidnightPlusFiveMinutes(t *testing.T) {
+func TestCloudflareRetryAfterUsesNextBeijingMidnight(t *testing.T) {
 	auth := &cliproxyauth.Auth{Attributes: map[string]string{
 		"base_url": "https://api.cloudflare.example/accounts/123/ai/v1",
 	}}
@@ -28,7 +28,7 @@ func TestCloudflareRetryAfterUsesNextUTCMidnightPlusFiveMinutes(t *testing.T) {
 		t.Fatal("expected cloudflare cooldown to be detected")
 	}
 
-	wantUnlock := time.Date(2026, 3, 27, 0, 5, 0, 0, time.UTC)
+	wantUnlock := time.Date(2026, 3, 27, 0, 0, 0, 0, qwenBeijingLoc)
 	if !unlockAt.Equal(wantUnlock) {
 		t.Fatalf("unlockAt = %v, want %v", unlockAt, wantUnlock)
 	}

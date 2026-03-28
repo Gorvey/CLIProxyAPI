@@ -163,9 +163,8 @@ func wrapQwenError(ctx context.Context, httpCode int, body []byte) (errCode int,
 // Qwen's daily quota resets at 00:00 Beijing time.
 func timeUntilNextDay() time.Duration {
 	now := time.Now()
-	nowLocal := now.In(qwenBeijingLoc)
-	tomorrow := time.Date(nowLocal.Year(), nowLocal.Month(), nowLocal.Day()+1, 0, 0, 0, 0, qwenBeijingLoc)
-	return tomorrow.Sub(now)
+	cooldown, _ := timeUntilNextDayAt(now, qwenBeijingLoc)
+	return cooldown
 }
 
 // QwenExecutor is a stateless executor for Qwen Code using OpenAI-compatible chat completions.
